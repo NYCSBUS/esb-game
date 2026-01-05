@@ -1,8 +1,37 @@
 // ESB Fleet Planner - Routing Module
 
 import { getState, setChargingStations } from './state.js';
-import { ROUTE_COLORS, CHARGING_STATIONS, ROUTE_CONFIG } from './config.js';
+import { ROUTE_COLORS, CHARGING_STATIONS, ROUTE_CONFIG, MAPBOX_TOKEN } from './config.js';
 import { randomPointNear, randomIntInRange, calculatePathLength, generateId } from './utils.js';
+
+/**
+ * Snap a coordinate to the nearest street address using Mapbox Geocoding API
+ * Returns the snapped coordinates and the street address name
+ */
+async function snapToStreet(coords) {
+    try {
+        const url = `https://api.mapbox.com/geocoding/v5/mapbox.places/${coords[0]},${coords[1]}.json?` +
+            `access_token=${MAPBOX_TOKEN}` +
+            `&types=address` +
+            `&limit=1`;
+        
+        const response = await fetch(url);
+        const data = await response.json();
+        
+        if (data.features && data.features.length > 0) {
+            const feature = data.features[0];
+            return {
+                coords: feature.center,
+                address: feature.place_name?.split(',')[0] || feature.text || null
+            };
+        }
+    } catch (error) {
+        console.warn('Street snapping failed, using original coords:', error);
+    }
+    
+    // Fallback to original coords
+    return { coords, address: null };
+}
 
 /**
  * Generate a single route based on the guessed distance
@@ -15,11 +44,11 @@ export async function generateRoutes(config) {
     // Generate exactly 1 route
     const targetOneWayDistance = Math.max(10, Math.min(60, guessDistance));
     
-    // Generate stops
-    const stops = generateStops(cityCoords, targetOneWayDistance);
+    // Generate stops with street-snapped coordinates
+    const stops = await generateStops(cityCoords, targetOneWayDistance);
     
     // Generate off-route public charging stations
-    const publicChargers = generatePublicChargingStations(cityCoords, stops);
+    const publicChargers = await generatePublicChargingStations(cityCoords, stops);
     setChargingStations(publicChargers);
     
     // Get OSRM path
@@ -55,9 +84,12 @@ export async function regenerateRoute(newDistance) {
     
     const targetOneWayDistance = Math.max(10, Math.min(60, newDistance));
     
-    const stops = generateStops(config.cityCoords, targetOneWayDistance);
+    // Generate stops with street-snapped coordinates
+    const stops = await generateStops(config.cityCoords, targetOneWayDistance);
     const path = await getOSRMRoute(stops);
     const distance = calculatePathLength(path);
+    
+    console.log(`Route regenerated: ${newDistance}mi target → ${(distance/2).toFixed(1)}mi actual one-way`);
     
     return {
         id: generateId(),
@@ -75,18 +107,21 @@ export async function regenerateRoute(newDistance) {
 }
 
 /**
- * Generate stops for a route
+ * Generate stops for a route with street-snapped coordinates
  * Order: Depot → Stops → School → Stops (reverse) → Depot
  */
-function generateStops(center, targetOneWayDistance) {
+async function generateStops(center, targetOneWayDistance) {
     const stops = [];
     
-    // Depot - starting point with charger (close to center, not 2 miles away)
-    const depotCoords = randomPointNear(center, 0.5);
+    // Depot - starting point with charger (close to center)
+    const depotRaw = randomPointNear(center, 0.5);
+    const depotSnapped = await snapToStreet(depotRaw);
+    const depotCoords = depotSnapped.coords;
+    
     stops.push({
         id: 'depot-start',
         type: 'depot',
-        name: 'Depot',
+        name: depotSnapped.address ? `Depot (${depotSnapped.address})` : 'Depot',
         coords: depotCoords,
         completed: false,
         hasCharger: true,
@@ -94,11 +129,7 @@ function generateStops(center, targetOneWayDistance) {
         phase: 'outbound'
     });
     
-    // Apply circuity factor to account for:
-    // - Road network inefficiency (1.3-1.5x)
-    // - OSRM routing through actual roads adds significant distance
-    // - Balance between overestimating and underestimating
-    // Configurable via admin panel (default 2.2x)
+    // Apply circuity factor to account for road network inefficiency
     const circuityFactor = ROUTE_CONFIG.circuityFactor;
     const adjustedDistance = targetOneWayDistance / circuityFactor;
     
@@ -111,23 +142,28 @@ function generateStops(center, targetOneWayDistance) {
     let currentPos = depotCoords;
     
     const stopCoords = [];
+    const stopNames = [];
     
+    // Generate and snap all pickup stops
     for (let i = 0; i < numStops; i++) {
-        // Fixed distance, no randomness
         const distance = stopSpacing;
-        // No angle variation - straight line
         const angle = direction;
         
         const newLng = currentPos[0] + (distance / 69) * Math.cos(angle);
         const newLat = currentPos[1] + (distance / 69) * Math.sin(angle);
-        currentPos = [newLng, newLat];
+        const rawCoords = [newLng, newLat];
+        
+        // Snap to nearest street
+        const snapped = await snapToStreet(rawCoords);
+        currentPos = snapped.coords;
         
         stopCoords.push(currentPos);
+        stopNames.push(snapped.address || `Stop ${i + 1}`);
         
         stops.push({
             id: `pickup-${i}`,
             type: 'pickup',
-            name: `Stop ${i + 1}`,
+            name: snapped.address || `Stop ${i + 1}`,
             coords: currentPos,
             completed: false,
             hasCharger: false,
@@ -135,11 +171,14 @@ function generateStops(center, targetOneWayDistance) {
         });
     }
     
-    // School - at the end with charger option (50% chance of having charger)
+    // School - at the end with charger option (50% chance)
     const schoolDistance = stopSpacing;
-    const schoolLng = currentPos[0] + (schoolDistance / 69) * Math.cos(direction);
-    const schoolLat = currentPos[1] + (schoolDistance / 69) * Math.sin(direction);
-    const schoolCoords = [schoolLng, schoolLat];
+    const schoolRaw = [
+        currentPos[0] + (schoolDistance / 69) * Math.cos(direction),
+        currentPos[1] + (schoolDistance / 69) * Math.sin(direction)
+    ];
+    const schoolSnapped = await snapToStreet(schoolRaw);
+    const schoolCoords = schoolSnapped.coords;
     
     // 50% chance school has a charger
     const schoolHasCharger = Math.random() < 0.5;
@@ -147,7 +186,7 @@ function generateStops(center, targetOneWayDistance) {
     stops.push({
         id: 'school',
         type: 'school',
-        name: 'School',
+        name: schoolSnapped.address ? `School (${schoolSnapped.address})` : 'School',
         coords: schoolCoords,
         completed: false,
         hasCharger: schoolHasCharger,
@@ -155,12 +194,12 @@ function generateStops(center, targetOneWayDistance) {
         phase: 'turnaround'
     });
     
-    // Return trip - reverse through stops
+    // Return trip - reverse through stops (using same snapped coordinates)
     for (let i = numStops - 1; i >= 0; i--) {
         stops.push({
             id: `dropoff-${i}`,
             type: 'dropoff',
-            name: `Stop ${i + 1}`,
+            name: stopNames[i],
             coords: stopCoords[i],
             completed: false,
             hasCharger: false,
@@ -172,7 +211,7 @@ function generateStops(center, targetOneWayDistance) {
     stops.push({
         id: 'depot-end',
         type: 'depot',
-        name: 'Depot',
+        name: stops[0].name, // Same as start depot
         coords: depotCoords,
         completed: false,
         hasCharger: true,
@@ -187,8 +226,9 @@ function generateStops(center, targetOneWayDistance) {
 /**
  * Generate public charging stations OFF the route
  * These are available for mid-day charging but require a detour
+ * Stations are snapped to actual street addresses
  */
-function generatePublicChargingStations(center, stops) {
+async function generatePublicChargingStations(center, stops) {
     const stations = [];
     
     // Find the school location (mid-point of route)
@@ -203,14 +243,17 @@ function generatePublicChargingStations(center, stops) {
         const distance = 1 + Math.random() * 2;
         const angle = (i / numStations) * 2 * Math.PI + Math.random() * 0.5;
         
-        const lng = schoolStop.coords[0] + (distance / 69) * Math.cos(angle);
-        const lat = schoolStop.coords[1] + (distance / 69) * Math.sin(angle);
+        const rawLng = schoolStop.coords[0] + (distance / 69) * Math.cos(angle);
+        const rawLat = schoolStop.coords[1] + (distance / 69) * Math.sin(angle);
+        
+        // Snap to street address
+        const snapped = await snapToStreet([rawLng, rawLat]);
         
         stations.push({
             id: `public-charger-${i + 1}`,
             type: 'public',
-            name: `Public Charger #${i + 1}`,
-            coords: [lng, lat],
+            name: snapped.address ? `Charger (${snapped.address})` : `Public Charger #${i + 1}`,
+            coords: snapped.coords,
             hasCharger: true,
             chargerType: 'public',
             distanceFromSchool: distance,

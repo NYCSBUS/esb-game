@@ -487,16 +487,22 @@ export function confirmNightlyCharging(targetPercent, newRouteDistance = null, v
         console.log(`V2G: Discharged ${v2gAmount.toFixed(1)} kWh, earned $${v2gEarned.toFixed(2)}`);
     }
     
-    // Get the current route distance BEFORE saving the new one
-    const previousRouteDistance = state.config.adjustedRouteDistance || state.config.guessDistance;
-    const needsRouteRegeneration = newRouteDistance !== null && newRouteDistance !== previousRouteDistance;
+    // Get the current route distance - check both actual route and config
+    const currentRoute = state.routes[0];
+    const currentRouteOneWay = currentRoute ? Math.round(currentRoute.oneWayDistance) : null;
+    const previousConfigDistance = state.config.adjustedRouteDistance || state.config.guessDistance;
+    
+    // Need to regenerate if user changed the distance from what's currently in effect
+    // Compare against the CONFIG distance (what user last selected), not actual route distance
+    const needsRouteRegeneration = newRouteDistance !== null && newRouteDistance !== previousConfigDistance;
     
     // Save adjusted route distance if provided
     if (newRouteDistance !== null) {
         state.config.adjustedRouteDistance = newRouteDistance;
-        if (needsRouteRegeneration) {
-            console.log(`Route adjusted to ${newRouteDistance} mi one-way for next day`);
-        }
+    }
+    
+    if (needsRouteRegeneration) {
+        console.log(`Route adjustment requested: ${previousConfigDistance} mi → ${newRouteDistance} mi (current route is ${currentRouteOneWay} mi)`);
     }
     
     // Record the decision
@@ -1349,14 +1355,7 @@ function showWeekResult() {
         
         ${bonusRows}
         
-        <div class="result-row">
-            <span>Week Electric Cost</span>
-            <span>$${totalElectricCost.toFixed(2)}</span>
-        </div>
-        <div class="result-row">
-            <span>Diesel Would Cost</span>
-            <span>$${dieselCost.toFixed(2)}</span>
-        </div>
+        ${generateCostBreakdown(state, totalDistance, state.week.totalOvernightCost, state.week.totalMidDayCost || 0)}
         
         ${generateAnnualProjections(state, totalDistance, totalElectricCost, dieselCost)}
     `;
@@ -1386,6 +1385,93 @@ function showWeekResult() {
     
     document.getElementById('modal-close').onclick = () => modal.classList.add('hidden');
     document.getElementById('modal-restart').onclick = () => location.reload();
+}
+
+/**
+ * Generate cost breakdown HTML for detailed explanation
+ */
+function generateCostBreakdown(state, totalDistance, totalOvernightCost, midDayCost) {
+    const mpg = state.config.busType === 'A' ? DIESEL_MPG.typeA : DIESEL_MPG.typeC;
+    const busTypeName = state.config.busType === 'A' ? 'Type A' : 'Type C';
+    
+    // Electric breakdown
+    const overnightKwh = state.stats.nightlyChargingKwh || 0;
+    const midDayKwh = state.stats.midDayChargingKwh || 0;
+    const totalKwh = overnightKwh + midDayKwh;
+    const v2gEarnings = state.week.totalV2GEarnings || 0;
+    const totalElectricCost = totalOvernightCost + midDayCost;
+    const netElectricCost = Math.max(0, totalElectricCost - v2gEarnings);
+    
+    // Diesel breakdown
+    const gallonsUsed = totalDistance / mpg;
+    const dieselCost = gallonsUsed * FUEL_COSTS.diesel.pricePerGallon;
+    
+    return `
+        <div class="cost-breakdown-section">
+            <h4>💰 Cost Calculation Details</h4>
+            
+            <div class="cost-card electric-breakdown">
+                <div class="cost-card-header">⚡ Electric Bus Costs</div>
+                <div class="cost-explanation">
+                    <div class="calc-step">
+                        <span class="calc-label">Overnight Charging</span>
+                        <span class="calc-formula">${overnightKwh.toFixed(1)} kWh × $${FUEL_COSTS.electric.overnight}/kWh</span>
+                        <span class="calc-result">= $${totalOvernightCost.toFixed(2)}</span>
+                    </div>
+                    ${midDayCost > 0 ? `
+                    <div class="calc-step penalty">
+                        <span class="calc-label">Mid-Day Charging (2x rate)</span>
+                        <span class="calc-formula">${midDayKwh.toFixed(1)} kWh × ~$${(FUEL_COSTS.electric.daytime).toFixed(2)}/kWh</span>
+                        <span class="calc-result">= $${midDayCost.toFixed(2)}</span>
+                    </div>` : ''}
+                    ${v2gEarnings > 0 ? `
+                    <div class="calc-step v2g-earning">
+                        <span class="calc-label">V2G Grid Discharge Earnings</span>
+                        <span class="calc-formula">${(state.week.totalV2GKwh || 0).toFixed(1)} kWh × $${V2G_CONFIG.dischargeRate}/kWh</span>
+                        <span class="calc-result">= -$${v2gEarnings.toFixed(2)}</span>
+                    </div>` : ''}
+                    <div class="calc-total">
+                        <span>Net Electric Cost</span>
+                        <span>$${netElectricCost.toFixed(2)}</span>
+                    </div>
+                    <div class="calc-per-mile">
+                        <span>Cost per Mile</span>
+                        <span>$${(netElectricCost / totalDistance).toFixed(3)}/mi</span>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="cost-card diesel-breakdown">
+                <div class="cost-card-header">⛽ Diesel Bus Costs</div>
+                <div class="cost-explanation">
+                    <div class="calc-step">
+                        <span class="calc-label">${busTypeName} Fuel Economy</span>
+                        <span class="calc-formula">${totalDistance.toFixed(1)} miles ÷ ${mpg} mpg</span>
+                        <span class="calc-result">= ${gallonsUsed.toFixed(1)} gallons</span>
+                    </div>
+                    <div class="calc-step">
+                        <span class="calc-label">Fuel Cost</span>
+                        <span class="calc-formula">${gallonsUsed.toFixed(1)} gal × $${FUEL_COSTS.diesel.pricePerGallon.toFixed(2)}/gal</span>
+                        <span class="calc-result">= $${dieselCost.toFixed(2)}</span>
+                    </div>
+                    <div class="calc-total">
+                        <span>Total Diesel Cost</span>
+                        <span>$${dieselCost.toFixed(2)}</span>
+                    </div>
+                    <div class="calc-per-mile">
+                        <span>Cost per Mile</span>
+                        <span>$${(dieselCost / totalDistance).toFixed(3)}/mi</span>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="savings-highlight">
+                <span class="savings-label">💚 3-Day Savings with Electric</span>
+                <span class="savings-value">$${(dieselCost - netElectricCost).toFixed(2)}</span>
+                <span class="savings-percent">(${(((dieselCost - netElectricCost) / dieselCost) * 100).toFixed(0)}% less)</span>
+            </div>
+        </div>
+    `;
 }
 
 /**

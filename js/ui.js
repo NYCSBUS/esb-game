@@ -699,9 +699,8 @@ export function showNightlyChargingModal(nextDay, nextDaySchedule, currentBatter
         const v2gAmount = v2gEnabled ? availableForV2G : 0;
         const v2gEarned = v2gEnabled ? v2gEarnings : 0;
         
-        // Save adjusted route distance
-        state.config.adjustedRouteDistance = newRouteDistance;
-        
+        // Pass the new route distance to confirmNightlyCharging
+        // Route regeneration decision is made there based on comparison with current distance
         confirmNightlyCharging(targetPercent, newRouteDistance, v2gAmount, v2gEarned);
     };
     

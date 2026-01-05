@@ -26,7 +26,7 @@ export const FUEL_COSTS = {
         daytime: 0.36     // $/kWh (2x penalty)
     },
     diesel: {
-        pricePerGallon: 3.00
+        pricePerGallon: 4.00  // Updated to $4/gallon
     }
 };
 
