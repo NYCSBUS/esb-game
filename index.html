@@ -1,0 +1,794 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ESB Fleet Planner | Plan Your Electric School Bus Routes</title>
+    <link href="https://api.mapbox.com/mapbox-gl-js/v3.0.1/mapbox-gl.css" rel="stylesheet">
+    <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+    <!-- Splash Screen -->
+    <div id="splash-screen" class="splash-screen">
+        <div class="splash-container">
+            <div class="splash-header">
+                <div class="splash-logo">🚌</div>
+                <h1>ESB Fleet Planner</h1>
+                <p class="tagline">Master the art of electric school bus route planning</p>
+            </div>
+
+            <div class="intro-card">
+                <h2>🎮 The Challenge</h2>
+                <p>Successfully complete 3 days of school bus routes while minimizing your total charging costs. Run out of battery and you lose!</p>
+                <div class="scoring-preview">
+                    <div class="score-item">
+                        <span class="score-icon">🚌</span>
+                        <span>Deliver reliable daily service for 3 days</span>
+                    </div>
+                    <div class="score-item">
+                        <span class="score-icon">🔋</span>
+                        <span>Choose smart nightly charge levels</span>
+                    </div>
+                    <div class="score-item">
+                        <span class="score-icon">💰</span>
+                        <span>Minimize total charging costs</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Step 1: Player Name -->
+            <div class="config-section">
+                <h2><span class="step-badge">1</span> Enter Your Name</h2>
+                <div class="player-input-wrapper">
+                    <input type="text" id="player-name" class="player-input" placeholder="Your name for the leaderboard" maxlength="20">
+                </div>
+            </div>
+
+            <!-- Step 2: City -->
+            <div class="config-section">
+                <h2><span class="step-badge">2</span> Choose Your Area</h2>
+                <div class="city-search-wrapper">
+                    <input type="text" id="city-search" class="city-input" placeholder="Search NY cities..." autocomplete="off">
+                    <div id="city-suggestions" class="suggestions-dropdown"></div>
+                    <input type="hidden" id="selected-city-coords">
+                    <div id="selected-city-display" class="selected-city"></div>
+                </div>
+            </div>
+
+            <!-- Step 3: Weather Pattern Selection -->
+            <div class="config-section weather-section">
+                <h2><span class="step-badge">3</span> Select Weather Challenge</h2>
+                <div class="weather-patterns" id="weather-patterns">
+                    <div class="weather-pattern-card" data-pattern="spring">
+                        <div class="pattern-header">
+                            <span class="pattern-icon">🌸</span>
+                            <span class="pattern-name">Spring Days</span>
+                            <span class="pattern-difficulty easy">Easy</span>
+                        </div>
+                        <p class="pattern-desc">Mild temperatures, mostly fair weather</p>
+                        <div class="pattern-schedule">
+                            <span class="day-pill fair">☀️ 1</span>
+                            <span class="day-pill fair">☀️ 2</span>
+                            <span class="day-pill cold">🌤️ 3</span>
+                        </div>
+                    </div>
+                    <div class="weather-pattern-card selected" data-pattern="fall">
+                        <div class="pattern-header">
+                            <span class="pattern-icon">🍂</span>
+                            <span class="pattern-name">Fall Days</span>
+                            <span class="pattern-difficulty medium">Medium</span>
+                        </div>
+                        <p class="pattern-desc">Mixed conditions, getting colder</p>
+                        <div class="pattern-schedule">
+                            <span class="day-pill fair">☀️ 1</span>
+                            <span class="day-pill cold">🌤️ 2</span>
+                            <span class="day-pill extreme">❄️ 3</span>
+                        </div>
+                    </div>
+                    <div class="weather-pattern-card" data-pattern="winter">
+                        <div class="pattern-header">
+                            <span class="pattern-icon">❄️</span>
+                            <span class="pattern-name">Winter Days</span>
+                            <span class="pattern-difficulty hard">Hard</span>
+                        </div>
+                        <p class="pattern-desc">Cold snap with extreme conditions</p>
+                        <div class="pattern-schedule">
+                            <span class="day-pill cold">🌤️ 1</span>
+                            <span class="day-pill extreme">❄️ 2</span>
+                            <span class="day-pill extreme">❄️ 3</span>
+                        </div>
+                    </div>
+                    <div class="weather-pattern-card" data-pattern="polar">
+                        <div class="pattern-header">
+                            <span class="pattern-icon">🥶</span>
+                            <span class="pattern-name">Polar Vortex</span>
+                            <span class="pattern-difficulty expert">Expert</span>
+                        </div>
+                        <p class="pattern-desc">Arctic conditions all 3 days!</p>
+                        <div class="pattern-schedule">
+                            <span class="day-pill extreme">❄️ 1</span>
+                            <span class="day-pill extreme">❄️ 2</span>
+                            <span class="day-pill extreme">❄️ 3</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Step 4: Scenario -->
+            <div class="config-section">
+                <h2><span class="step-badge">4</span> Set Your Bus</h2>
+                <div class="scenario-grid">
+                    <div class="scenario-row">
+                        <div class="scenario-item">
+                            <label>Bus Type</label>
+                            <div class="pill-group">
+                                <button class="pill-btn active" data-type="A">Type A</button>
+                                <button class="pill-btn" data-type="C">Type C</button>
+                            </div>
+                        </div>
+                        <div class="scenario-item">
+                            <label>Battery Size</label>
+                            <div class="range-group">
+                                <input type="range" id="battery-capacity" min="80" max="220" step="5" value="100">
+                                <span id="battery-display" class="range-value">100 kWh</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Step 5: Prediction -->
+            <div class="config-section prediction-section">
+                <h2><span class="step-badge">5</span> Predict Your Route Distance</h2>
+                <div class="prediction-box">
+                    <p class="prediction-label">What's the maximum one-way distance your bus can handle all 3 days?</p>
+                    <div class="distance-slider">
+                        <input type="range" id="guess-distance" min="10" max="60" value="25">
+                    </div>
+                    <div class="distance-display">
+                        <span id="guess-value" class="distance-number">25</span>
+                        <span class="distance-unit">miles</span>
+                    </div>
+                    <div class="trip-breakdown">
+                        <span>One-way: <strong id="calc-one-way">25 mi</strong></span>
+                        <span>Daily round-trip: <strong id="calc-total">50 mi</strong></span>
+                    </div>
+                    <div class="optimal-hint" id="optimal-hint">
+                        <!-- Filled dynamically based on settings -->
+                    </div>
+                </div>
+            </div>
+
+            <button id="start-simulation" class="start-btn" disabled>
+                <span class="btn-text">Select a City to Begin</span>
+                <span class="btn-icon">→</span>
+            </button>
+
+            <div class="leaderboard-preview" id="leaderboard-preview">
+                <h3>🏆 Leaderboard</h3>
+                <div class="leaderboard-list" id="leaderboard-list">
+                    <!-- Filled dynamically -->
+                </div>
+            </div>
+
+            <div class="splash-footer">
+                <div class="rules-row">
+                    <span>💀 0% Battery = Game Over</span>
+                    <span>🔋 Smart Charging = +75 pts/day</span>
+                    <span>⚡ Mid-day Charge = -50 pts</span>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Main App -->
+    <div id="app" class="app hidden">
+        <header class="app-header">
+            <div class="header-left">
+                <span class="header-logo">🚌</span>
+                <h1>ESB Fleet Planner</h1>
+                <span class="city-badge" id="header-city"></span>
+            </div>
+            <div class="header-center">
+                <div class="day-progress">
+                    <span class="day-label">Day</span>
+                    <span class="day-number" id="current-day">1</span>
+                    <span class="day-label">of 3</span>
+                    <span class="day-weather" id="day-weather">☀️</span>
+                </div>
+                <div class="time-display" id="time-display">
+                    <span class="time-icon">🕐</span>
+                    <span class="time-value" id="current-time">5:00 AM</span>
+                </div>
+                <div class="trip-indicator" id="trip-indicator">
+                    <span class="trip-text" id="trip-text">🌅 AM Trip</span>
+                </div>
+                <div class="control-btns">
+                    <button id="btn-start" class="ctrl-btn primary">
+                        <span>▶</span> Start
+                    </button>
+                    <button id="btn-pause" class="ctrl-btn" disabled>
+                        <span>⏸</span> Pause
+                    </button>
+                    <button id="btn-reset" class="ctrl-btn">
+                        <span>↺</span> New
+                    </button>
+                </div>
+            </div>
+            <div class="header-right">
+                <div class="score-display">
+                    <span class="score-label">Score</span>
+                    <span class="score-value" id="current-score">0</span>
+                </div>
+                <div class="guess-badge">
+                    <span class="label">Your Pick</span>
+                    <span class="value" id="display-guess">25 mi</span>
+                </div>
+            </div>
+        </header>
+
+        <div class="app-content">
+            <!-- Left Sidebar -->
+            <aside class="sidebar">
+                <div class="sidebar-section">
+                    <h3 class="section-title">📅 Week Progress</h3>
+                    <div class="week-progress" id="week-progress">
+                        <!-- Filled dynamically -->
+                    </div>
+                </div>
+
+                <div class="sidebar-section">
+                    <h3 class="section-title">🚌 Your Route</h3>
+                    <div id="routes-list" class="routes-list"></div>
+                </div>
+
+                <div class="sidebar-section penalty-section" id="penalty-section">
+                    <h3 class="section-title">⚡ Charging Summary</h3>
+                    <div class="charging-summary">
+                        <div class="charge-stat">
+                            <span class="charge-label">🌙 Overnight</span>
+                            <span class="charge-value" id="overnight-charges">0 kWh</span>
+                            <span class="charge-cost" id="overnight-cost">$0.00</span>
+                        </div>
+                        <div class="charge-stat penalty">
+                            <span class="charge-label">☀️ Mid-Day</span>
+                            <span class="charge-value" id="midday-charges">0 kWh</span>
+                            <span class="charge-cost" id="midday-cost">$0.00</span>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="sidebar-section score-section">
+                    <h3 class="section-title">🏆 Score Breakdown</h3>
+                    <div class="score-breakdown" id="score-breakdown">
+                        <!-- Filled dynamically -->
+                    </div>
+                </div>
+            </aside>
+
+            <!-- Map -->
+            <div class="map-container">
+                <div id="map"></div>
+                <div class="map-legend">
+                    <div class="legend-item"><span class="legend-dot depot"></span>Depot</div>
+                    <div class="legend-item"><span class="legend-dot school"></span>School</div>
+                    <div class="legend-item"><span class="legend-dot stop"></span>Stop</div>
+                    <div class="legend-item"><span class="legend-dot charger"></span>Charger</div>
+                </div>
+            </div>
+
+            <!-- Right Panel -->
+            <aside class="right-panel">
+                <div class="panel-section">
+                    <h3 class="section-title">📊 Today's Stats</h3>
+                    <div class="stats-grid" id="stats-grid">
+                        <div class="stat-row">
+                            <span class="stat-label">Weather</span>
+                            <span class="stat-value" id="stat-weather">☀️ Fair</span>
+                        </div>
+                        <div class="stat-row">
+                            <span class="stat-label">Efficiency</span>
+                            <span class="stat-value" id="stat-efficiency">1.30 kWh/mi</span>
+                        </div>
+                        <div class="stat-row">
+                            <span class="stat-label">Battery</span>
+                            <span class="stat-value" id="stat-battery">155 kWh</span>
+                        </div>
+                        <div class="stat-divider"></div>
+                        <div class="stat-row">
+                            <span class="stat-label">Usable Range</span>
+                            <span class="stat-value highlight" id="stat-range">101 mi</span>
+                        </div>
+                        <div class="stat-row">
+                            <span class="stat-label">Your Route</span>
+                            <span class="stat-value" id="stat-route">50 mi</span>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="panel-section co2-section">
+                    <h3 class="section-title">🌍 Environmental Impact</h3>
+                    <div class="co2-display">
+                        <div class="co2-main">
+                            <span class="co2-value" id="co2-avoided">0.0</span>
+                            <span class="co2-unit">lbs CO₂</span>
+                        </div>
+                        <div class="co2-label">emissions avoided</div>
+                        <div class="pickups-count">
+                            <span id="pickups-completed">0</span> clean pickups 🌿
+                        </div>
+                    </div>
+                </div>
+
+                <div class="panel-section">
+                    <h3 class="section-title">💰 Cost Comparison</h3>
+                    <div class="cost-comparison">
+                        <div class="cost-row">
+                            <span class="cost-type">⚡ Electric</span>
+                            <span class="cost-amount" id="ev-cost">$0.00/mi</span>
+                        </div>
+                        <div class="cost-row diesel">
+                            <span class="cost-type">⛽ Diesel</span>
+                            <span class="cost-amount" id="diesel-cost">$0.33/mi</span>
+                        </div>
+                        <div class="savings-row">
+                            Savings: <strong id="savings">$0.00/mi</strong>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="panel-section">
+                    <h3 class="section-title">⚡ Charging Rates</h3>
+                    <div class="rate-cards">
+                        <div class="rate-card overnight">
+                            <span class="rate-time">🌙 Overnight</span>
+                            <span class="rate-price">$0.18/kWh</span>
+                        </div>
+                        <div class="rate-card daytime">
+                            <span class="rate-time">☀️ Mid-Day</span>
+                            <span class="rate-price">$0.36/kWh</span>
+                            <span class="rate-note">2× penalty</span>
+                        </div>
+                    </div>
+                </div>
+            </aside>
+        </div>
+    </div>
+
+    <!-- Nightly Charging Decision Modal -->
+    <div id="nightly-charge-modal" class="modal nightly-modal hidden">
+        <div class="modal-content">
+            <div class="modal-header">
+                <div class="modal-icon">🌙</div>
+                <h2>Prepare for Tomorrow</h2>
+                <p class="modal-subtitle" id="nightly-day-info">Day 2 Planning</p>
+            </div>
+            <div class="modal-body">
+                <!-- Warning Banner (hidden by default, shown when route can't complete) -->
+                <div id="route-warning-banner" class="route-warning-banner hidden">
+                    <div class="warning-icon">⚠️</div>
+                    <div class="warning-text">
+                        <strong>Route too long for single charge!</strong>
+                        <p>Your current route requires mid-day charging. Consider shortening it below.</p>
+                    </div>
+                </div>
+
+                <!-- Tomorrow's Conditions -->
+                <div class="nightly-info">
+                    <div class="tomorrow-forecast">
+                        <h4>Tomorrow's Conditions</h4>
+                        <div class="forecast-details">
+                            <span class="forecast-icon" id="forecast-icon">🌤️</span>
+                            <span class="forecast-weather" id="forecast-weather">Cold</span>
+                            <span class="forecast-efficiency" id="forecast-efficiency">1.60 kWh/mi</span>
+                        </div>
+                    </div>
+                    <div class="bus-status">
+                        <div class="status-item">
+                            <span class="value" id="nightly-current-battery">25%</span>
+                            <span class="label">Current Battery</span>
+                        </div>
+                        <div class="status-item">
+                            <span class="value" id="nightly-battery-capacity">100 kWh</span>
+                            <span class="label">Battery Capacity</span>
+                        </div>
+                        <div class="status-item highlight" id="nightly-max-range-item">
+                            <span class="value" id="nightly-max-range">62 mi</span>
+                            <span class="label">Max Range (100%)</span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- V2G Section -->
+                <div class="v2g-section" id="v2g-section">
+                    <div class="v2g-header">
+                        <span class="v2g-icon">🔌</span>
+                        <h4>V2G Opportunity</h4>
+                        <span class="v2g-badge">Earn Money!</span>
+                    </div>
+                    <p class="v2g-description">Discharge to the grid (4 PM - 8 PM) before charging overnight</p>
+                    
+                    <div class="v2g-toggle-container">
+                        <label class="v2g-toggle">
+                            <input type="checkbox" id="v2g-enabled" checked>
+                            <span class="v2g-toggle-slider"></span>
+                            <span class="v2g-toggle-label">Enable V2G</span>
+                        </label>
+                    </div>
+                    
+                    <div class="v2g-details" id="v2g-details">
+                        <div class="v2g-stats">
+                            <div class="v2g-stat">
+                                <span class="v2g-stat-value" id="v2g-discharge-kwh">20 kWh</span>
+                                <span class="v2g-stat-label">Discharge</span>
+                            </div>
+                            <div class="v2g-stat earning">
+                                <span class="v2g-stat-value" id="v2g-earnings">+$6.00</span>
+                                <span class="v2g-stat-label">Earned</span>
+                            </div>
+                        </div>
+                        <p class="v2g-note">Discharge from <span id="v2g-current-soc">43%</span> → 20% min</p>
+                    </div>
+                </div>
+
+                <!-- Step 1: Choose Target Charge -->
+                <div class="charge-decision">
+                    <div class="step-header">
+                        <span class="step-number">1</span>
+                        <h4>Set Target State of Charge</h4>
+                    </div>
+                    <p class="charge-hint">💡 Smart charging earns bonus points!</p>
+                    
+                    <div class="charge-slider-container">
+                        <input type="range" id="nightly-charge-level" min="20" max="100" value="80" step="5">
+                        <div class="charge-display">
+                            <span class="charge-percent" id="nightly-charge-percent">80%</span>
+                            <span class="charge-label">Target SoC</span>
+                        </div>
+                    </div>
+                    
+                    <div class="charge-cost-preview">
+                        <div class="cost-row">
+                            <span>Energy to add:</span>
+                            <strong id="nightly-charge-kwh">+85 kWh</strong>
+                        </div>
+                        <div class="cost-row">
+                            <span>Overnight cost:</span>
+                            <strong id="nightly-charge-cost">$15.30</strong>
+                        </div>
+                        <div class="cost-row highlight">
+                            <span>Usable range:</span>
+                            <strong id="nightly-usable-range">50 mi</strong>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- Step 2: Adjust Route if Needed -->
+                <div class="route-adjustment-section">
+                    <div class="step-header">
+                        <span class="step-number">2</span>
+                        <h4>Choose Route Length</h4>
+                    </div>
+                    <p class="adjustment-hint" id="route-adjustment-hint">Keep under usable range to avoid mid-day charging</p>
+                    
+                    <div class="adjustment-slider-container">
+                        <input type="range" id="nightly-route-adjust" min="10" max="60" value="25">
+                        <div class="adjustment-display">
+                            <span class="adjustment-value" id="nightly-route-new">25 mi</span>
+                            <span class="adjustment-label">one-way</span>
+                        </div>
+                    </div>
+                    <div class="adjustment-calculation">
+                        <div class="calc-item">
+                            <span>Round-trip:</span>
+                            <strong id="nightly-roundtrip">50 mi</strong>
+                        </div>
+                        <div class="calc-item">
+                            <span>Energy needed:</span>
+                            <strong id="nightly-adjusted-energy">~80 kWh</strong>
+                        </div>
+                        <div class="calc-item" id="route-safety-indicator">
+                            <span>Margin:</span>
+                            <strong id="nightly-safety-margin">+20%</strong>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button id="confirm-nightly-charge" class="modal-btn primary">Confirm & Continue →</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Mid-Day Charging Station Selection Modal -->
+    <div id="charging-modal" class="modal charging-modal hidden">
+        <div class="modal-content">
+            <div class="modal-header">
+                <div class="modal-icon">⚡</div>
+                <h2>Mid-Day Charging Needed!</h2>
+                <p class="penalty-warning">⚠️ This will cost you -50 points</p>
+                <p class="charging-time-note">🕘 Mid-day charging window: 9 AM - 1 PM</p>
+            </div>
+            <div class="modal-body">
+                <div class="charging-info">
+                    <p>Your bus needs a charge to complete the return trip.</p>
+                    <div class="bus-status">
+                        <div class="status-item">
+                            <span class="value" id="charging-battery">15%</span>
+                            <span class="label">Battery</span>
+                        </div>
+                        <div class="status-item">
+                            <span class="value" id="charging-needed">+25 kWh</span>
+                            <span class="label">Needed</span>
+                        </div>
+                    </div>
+                </div>
+                <div class="charging-options">
+                    <h3>Choose a charging location & type:</h3>
+                    <p class="charging-options-hint">
+                        ⚠️ <strong>Deadhead miles</strong> = extra travel to/from charger (energy + point penalty)
+                    </p>
+                    <div class="station-list" id="station-list">
+                        <!-- Filled dynamically -->
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button id="confirm-charging" class="modal-btn primary">Charge Here</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Result Modal -->
+    <div id="completion-modal" class="modal hidden">
+        <div class="modal-content result-modal">
+            <div class="modal-header" id="modal-header">
+                <div class="modal-icon" id="result-icon">🎉</div>
+                <h2 id="result-title">Week Complete!</h2>
+            </div>
+            <div class="modal-body">
+                <div class="final-score">
+                    <span class="final-score-label">Final Score</span>
+                    <span class="final-score-value" id="final-score">0</span>
+                </div>
+                <div class="result-grid" id="result-summary"></div>
+                <div class="leaderboard-entry" id="leaderboard-entry">
+                    <h3>🏆 You made the leaderboard!</h3>
+                    <p>Position: <strong id="leaderboard-position">#1</strong></p>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button id="modal-restart" class="modal-btn primary">Play Again</button>
+                <button id="modal-close" class="modal-btn">Close</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Admin Panel -->
+    <div id="admin-panel" class="admin-panel hidden">
+        <div class="admin-container">
+            <!-- Login Screen -->
+            <div id="admin-login" class="admin-login">
+                <div class="admin-header">
+                    <h2>🔐 Admin Panel</h2>
+                    <button id="admin-close" class="admin-close-btn">✕</button>
+                </div>
+                <div class="admin-login-form">
+                    <p>Enter admin password to access settings</p>
+                    <input type="password" id="admin-password" placeholder="Password" autocomplete="off">
+                    <button id="admin-login-btn" class="modal-btn primary">Login</button>
+                    <p id="admin-login-error" class="admin-error hidden">Incorrect password</p>
+                </div>
+            </div>
+
+            <!-- Admin Settings (shown after login) -->
+            <div id="admin-settings" class="admin-settings hidden">
+                <div class="admin-header">
+                    <h2>⚙️ Game Settings</h2>
+                    <button id="admin-logout" class="admin-close-btn">✕</button>
+                </div>
+                
+                <div class="admin-body">
+                    <!-- Efficiency Settings -->
+                    <div class="admin-section">
+                        <h3>🔋 ESB Efficiency (kWh/mile)</h3>
+                        <div class="admin-grid">
+                            <div class="admin-group">
+                                <h4>Type A Bus</h4>
+                                <div class="admin-field">
+                                    <label>Fair Weather (>65°F)</label>
+                                    <input type="number" id="admin-eff-a-fair" step="0.1" min="0.5" max="5">
+                                </div>
+                                <div class="admin-field">
+                                    <label>Cold Weather (40-65°F)</label>
+                                    <input type="number" id="admin-eff-a-cold" step="0.1" min="0.5" max="5">
+                                </div>
+                                <div class="admin-field">
+                                    <label>Extreme Cold (&lt;40°F)</label>
+                                    <input type="number" id="admin-eff-a-extreme" step="0.1" min="0.5" max="5">
+                                </div>
+                            </div>
+                            <div class="admin-group">
+                                <h4>Type C Bus</h4>
+                                <div class="admin-field">
+                                    <label>Fair Weather (>65°F)</label>
+                                    <input type="number" id="admin-eff-c-fair" step="0.1" min="0.5" max="5">
+                                </div>
+                                <div class="admin-field">
+                                    <label>Cold Weather (40-65°F)</label>
+                                    <input type="number" id="admin-eff-c-cold" step="0.1" min="0.5" max="5">
+                                </div>
+                                <div class="admin-field">
+                                    <label>Extreme Cold (&lt;40°F)</label>
+                                    <input type="number" id="admin-eff-c-extreme" step="0.1" min="0.5" max="5">
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Battery Settings -->
+                    <div class="admin-section">
+                        <h3>🔌 Battery Configuration</h3>
+                        <div class="admin-grid">
+                            <div class="admin-field">
+                                <label>Type A Default Capacity (kWh)</label>
+                                <input type="number" id="admin-battery-a" step="5" min="50" max="300">
+                            </div>
+                            <div class="admin-field">
+                                <label>Type C Default Capacity (kWh)</label>
+                                <input type="number" id="admin-battery-c" step="5" min="50" max="400">
+                            </div>
+                            <div class="admin-field">
+                                <label>Min Battery Slider (kWh)</label>
+                                <input type="number" id="admin-battery-min" step="5" min="20" max="100">
+                            </div>
+                            <div class="admin-field">
+                                <label>Max Battery Slider (kWh)</label>
+                                <input type="number" id="admin-battery-max" step="5" min="100" max="500">
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Fuel Cost Settings -->
+                    <div class="admin-section">
+                        <h3>💰 Fuel Costs</h3>
+                        <div class="admin-grid">
+                            <div class="admin-field">
+                                <label>Electric - Overnight ($/kWh)</label>
+                                <input type="number" id="admin-cost-overnight" step="0.01" min="0.05" max="1">
+                            </div>
+                            <div class="admin-field">
+                                <label>Electric - Daytime ($/kWh)</label>
+                                <input type="number" id="admin-cost-daytime" step="0.01" min="0.05" max="2">
+                            </div>
+                            <div class="admin-field">
+                                <label>Diesel ($/gallon)</label>
+                                <input type="number" id="admin-cost-diesel" step="0.10" min="1" max="10">
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- V2G Settings -->
+                    <div class="admin-section">
+                        <h3>🔌 V2G (Vehicle-to-Grid)</h3>
+                        <div class="admin-grid">
+                            <div class="admin-field">
+                                <label>V2G Rate ($/kWh earned)</label>
+                                <input type="number" id="admin-v2g-rate" step="0.05" min="0.10" max="1">
+                            </div>
+                            <div class="admin-field">
+                                <label>Min Discharge Level (%)</label>
+                                <input type="number" id="admin-v2g-min-level" step="5" min="10" max="40">
+                            </div>
+                            <div class="admin-field">
+                                <label>School Days per Year</label>
+                                <input type="number" id="admin-v2g-school-days" step="5" min="150" max="200">
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Diesel MPG -->
+                    <div class="admin-section">
+                        <h3>⛽ Diesel MPG (for comparison)</h3>
+                        <div class="admin-grid">
+                            <div class="admin-field">
+                                <label>Type A MPG</label>
+                                <input type="number" id="admin-mpg-a" step="0.5" min="3" max="15">
+                            </div>
+                            <div class="admin-field">
+                                <label>Type C MPG</label>
+                                <input type="number" id="admin-mpg-c" step="0.5" min="2" max="12">
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Scoring Settings -->
+                    <div class="admin-section">
+                        <h3>🏆 Scoring</h3>
+                        <div class="admin-grid">
+                            <div class="admin-field">
+                                <label>Day Completed Bonus</label>
+                                <input type="number" id="admin-score-day" step="10" min="0" max="500">
+                            </div>
+                            <div class="admin-field">
+                                <label>No Mid-Day Charge Bonus</label>
+                                <input type="number" id="admin-score-no-midday" step="10" min="0" max="500">
+                            </div>
+                            <div class="admin-field">
+                                <label>Mid-Day Charge Penalty</label>
+                                <input type="number" id="admin-score-midday-penalty" step="10" min="-500" max="0">
+                            </div>
+                            <div class="admin-field">
+                                <label>Efficient Charge Bonus</label>
+                                <input type="number" id="admin-score-efficient" step="10" min="0" max="300">
+                            </div>
+                            <div class="admin-field">
+                                <label>Deadhead Penalty (per mile)</label>
+                                <input type="number" id="admin-deadhead-penalty" step="1" min="0" max="50">
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Charging Rates -->
+                    <div class="admin-section">
+                        <h3>⚡ Charging Rates</h3>
+                        <div class="admin-grid">
+                            <div class="admin-field">
+                                <label>Level 2 Rate (kWh/hr)</label>
+                                <input type="number" id="admin-charge-l2" step="1" min="5" max="30">
+                            </div>
+                            <div class="admin-field">
+                                <label>Level 3 / DC Fast (kWh/hr)</label>
+                                <input type="number" id="admin-charge-l3" step="5" min="20" max="150">
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Simulation Settings -->
+                    <div class="admin-section">
+                        <h3>⏱️ Simulation</h3>
+                        <div class="admin-grid">
+                            <div class="admin-field">
+                                <label>Day Duration (seconds)</label>
+                                <input type="number" id="admin-sim-duration" step="5" min="5" max="120">
+                            </div>
+                            <div class="admin-field">
+                                <label>Base Speed (MPH)</label>
+                                <input type="number" id="admin-sim-speed" step="5" min="10" max="50">
+                            </div>
+                            <div class="admin-field">
+                                <label>School Charger Availability (%)</label>
+                                <input type="number" id="admin-school-charger" step="5" min="0" max="100">
+                            </div>
+                            <div class="admin-field">
+                                <label>Circuity Factor</label>
+                                <input type="number" id="admin-circuity" step="0.1" min="1.0" max="4.0">
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Leaderboard Management -->
+                    <div class="admin-section">
+                        <h3>📊 Leaderboard</h3>
+                        <div class="admin-actions">
+                            <button id="admin-clear-leaderboard" class="modal-btn danger">Clear Leaderboard</button>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="admin-footer">
+                    <button id="admin-save" class="modal-btn primary">💾 Save Settings</button>
+                    <button id="admin-reset" class="modal-btn">↺ Reset to Defaults</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Admin Access Button (hidden in corner) -->
+    <button id="admin-trigger" class="admin-trigger" title="Admin Panel">⚙️</button>
+
+    <script src="https://api.mapbox.com/mapbox-gl-js/v3.0.1/mapbox-gl.js"></script>
+    <script src="https://unpkg.com/@turf/turf@6.5.0/turf.min.js"></script>
+    <script type="module" src="app.js"></script>
+</body>
+</html>
