@@ -1,6 +1,6 @@
 // ESB Fleet Planner - Configuration
 
-export const APP_VERSION = '3.0.0';
+export const APP_VERSION = '3.1.0';
 
 export const MAPBOX_TOKEN = 'pk.eyJ1IjoidnIwMG4tbnljc2J1cyIsImEiOiJjbDB5cHhoeHgxcmEyM2ptdXVkczk1M2xlIn0.qq6o-6TMurwke-t1eyetBw';
 
@@ -247,7 +247,16 @@ export const SCORING = {
     },
     
     // Perfect week bonus
-    perfectWeekBonus: 1000
+    perfectWeekBonus: 1000,
+    
+    // Regen braking bonuses (defined in REGEN_BRAKING_CONFIG)
+    // Perfect regen: +10, Good regen: +5
+    
+    // HVAC bonuses/penalties (defined in HVAC_CONFIG)
+    // Comfort bonus: +15, Eco overuse penalty: -25
+    
+    // Weather shift survival bonus (defined in WEATHER_SHIFT_CONFIG)
+    // Survived weather shift without mid-day charge: +50
 };
 
 // Charging Station Types with Level 2 and Level 3 options
@@ -329,4 +338,42 @@ export const MIDDAY_CHARGING = {
 export const LEADERBOARD_CONFIG = {
     maxEntries: 10,
     storageKey: 'esb_leaderboard'
+};
+
+// HVAC Management Configuration (Dial-based: 1=Cold/Eco to 5=Hot/Comfort)
+export const HVAC_CONFIG = {
+    minLevel: 1,                      // Coldest setting (max eco, min comfort)
+    maxLevel: 5,                      // Hottest setting (max comfort, full heating)
+    defaultLevel: 3,                  // Balanced starting position
+    optimalRange: { min: 2, max: 4 }, // Optimal balance zone
+    efficiencyPerLevel: 0.05,         // 5% efficiency change per level from center
+    comfortPenaltyThreshold: 2,       // Avg level below this = penalty
+    comfortPenalty: -25,              // Points penalty for keeping passengers cold
+    optimalBonus: 20,                 // Bonus for staying in optimal range
+    disabledInFairWeather: true       // HVAC control not needed in fair weather
+};
+
+// Regenerative Braking Configuration
+export const REGEN_BRAKING_CONFIG = {
+    triggerDistance: 0.2,             // Miles from stop to trigger event
+    perfectWindow: 0.20,              // 20% of timing window for perfect score
+    goodWindow: 0.45,                 // 45% of timing window for good score
+    eventDuration: 3500,              // 3.5 seconds to react (ms) - slower for better UX
+    energyRecoveryMin: 0.3,           // Minimum kWh recovered
+    energyRecoveryMax: 0.8,           // Maximum kWh recovered (perfect timing)
+    perfectBonus: 10,                 // Points for perfect timing
+    goodBonus: 5                      // Points for good timing
+};
+
+// Weather Shift Configuration
+export const WEATHER_SHIFT_CONFIG = {
+    enabled: true,
+    probability: 0.30,                // 30% chance of weather shift per day
+    eligiblePatterns: ['fall', 'winter'],  // Only these patterns can have shifts
+    shifts: {
+        fair: { warmer: null, colder: 'cold' },
+        cold: { warmer: 'fair', colder: 'extreme' },
+        extreme: { warmer: 'cold', colder: null }
+    },
+    survivalBonus: 50                 // Bonus for surviving weather shift without mid-day charge
 };

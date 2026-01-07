@@ -64,7 +64,21 @@ const state = {
         lastUpdate: null,
         tripPhase: 'am', // 'am', 'midday', or 'pm'
         currentTime: 5.0, // Current simulated hour (5.0 = 5:00 AM)
-        timeString: '5:00 AM' // Human-readable time
+        timeString: '5:00 AM', // Human-readable time
+        // HVAC dial state
+        hvacLevel: 3,        // 1-5 dial position (1=cold/eco, 5=hot/comfort)
+        hvacLevelSamples: [],// Samples for scoring average
+        // Regen braking state
+        regenEventActive: false,
+        regenEventStop: null,
+        regenEventStartTime: null,
+        regenSuccessCount: 0,
+        regenPerfectCount: 0,
+        regenEnergyRecovered: 0,
+        // Weather shift state
+        weatherShifted: false,
+        originalWeather: null,
+        shiftedWeather: null
     },
     
     // Daily statistics
@@ -234,7 +248,21 @@ export function resetSimulation() {
         lastUpdate: null,
         tripPhase: 'am',
         currentTime: 5.0,
-        timeString: '5:00 AM'
+        timeString: '5:00 AM',
+        // HVAC dial state
+        hvacLevel: 3,
+        hvacLevelSamples: [],
+        // Regen braking state
+        regenEventActive: false,
+        regenEventStop: null,
+        regenEventStartTime: null,
+        regenSuccessCount: 0,
+        regenPerfectCount: 0,
+        regenEnergyRecovered: 0,
+        // Weather shift state
+        weatherShifted: false,
+        originalWeather: null,
+        shiftedWeather: null
     };
 }
 

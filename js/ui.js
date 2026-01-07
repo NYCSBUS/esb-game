@@ -1,9 +1,9 @@
 // ESB Fleet Planner - UI Module
 
 import { getState, updateUI as updateUIState, getLeaderboard, updatePlayer } from './state.js';
-import { MAPBOX_TOKEN, ESB_EFFICIENCY, FUEL_COSTS, DIESEL_MPG, BATTERY_CONFIG, WEATHER_PATTERNS, WEATHER_INFO, SCORING, V2G_CONFIG } from './config.js';
+import { MAPBOX_TOKEN, ESB_EFFICIENCY, FUEL_COSTS, DIESEL_MPG, BATTERY_CONFIG, WEATHER_PATTERNS, WEATHER_INFO, SCORING, V2G_CONFIG, HVAC_CONFIG, REGEN_BRAKING_CONFIG } from './config.js';
 import { formatCurrency, debounce } from './utils.js';
-import { calculateElectricCost, calculateDieselCost, confirmCharging, confirmNightlyCharging, getEfficiency } from './simulation.js';
+import { calculateElectricCost, calculateDieselCost, confirmCharging, confirmNightlyCharging, getEfficiency, setHVACLevel, triggerRegenBrakeInput } from './simulation.js';
 
 /**
  * Initialize splash screen
@@ -852,4 +852,303 @@ export function updateCO2Display() {
     if (pickupsElement) {
         pickupsElement.textContent = state.stats.pickupsCompleted || 0;
     }
+}
+
+/**
+ * Initialize HVAC dial controls
+ */
+export function initHVACControls() {
+    const dial = document.getElementById('hvac-dial');
+    
+    if (!dial) return;
+    
+    dial.addEventListener('input', (e) => {
+        const level = parseInt(e.target.value);
+        setHVACLevel(level);
+    });
+    
+    // Initial update
+    updateHVACDisplay();
+}
+
+/**
+ * Update HVAC dial display
+ */
+export function updateHVACDisplay() {
+    const state = getState();
+    
+    const dial = document.getElementById('hvac-dial');
+    const levelDisplay = document.getElementById('hvac-level-display');
+    const effectDisplay = document.getElementById('hvac-effect');
+    const statusEl = document.getElementById('hvac-status');
+    const warningEl = document.getElementById('hvac-warning');
+    const avgLevelEl = document.getElementById('hvac-avg-level');
+    const avgFillEl = document.getElementById('hvac-avg-fill');
+    const hvacSection = document.querySelector('.hvac-section');
+    const ticks = document.querySelectorAll('.hvac-dial-ticks .tick');
+    
+    if (!dial) return;
+    
+    const isFairWeather = state.weather === 'fair';
+    const level = state.simulation.hvacLevel || HVAC_CONFIG.defaultLevel;
+    
+    // Disable in fair weather
+    if (isFairWeather) {
+        dial.disabled = true;
+        if (hvacSection) hvacSection.classList.add('disabled');
+        if (statusEl) statusEl.textContent = 'No heating needed - fair weather';
+    } else {
+        dial.disabled = false;
+        if (hvacSection) hvacSection.classList.remove('disabled');
+        
+        // Update dial value
+        dial.value = level;
+        
+        // Update level display
+        if (levelDisplay) levelDisplay.textContent = `Level ${level}`;
+        
+        // Update effect description
+        if (effectDisplay) {
+            const effects = {
+                1: '❄️ Max Eco (-10%)',
+                2: '🌿 Eco (-5%)',
+                3: '⚖️ Balanced',
+                4: '🔥 Warm (+5%)',
+                5: '🔥🔥 Max Heat (+10%)'
+            };
+            effectDisplay.textContent = effects[level] || 'Balanced';
+        }
+        
+        // Update status
+        if (statusEl) {
+            const centerLevel = 3;
+            const diff = level - centerLevel;
+            const effChange = Math.abs(diff * 5);
+            if (diff < 0) {
+                statusEl.textContent = `Eco mode - ${effChange}% energy savings`;
+            } else if (diff > 0) {
+                statusEl.textContent = `Comfort mode - ${effChange}% more energy`;
+            } else {
+                statusEl.textContent = 'Balanced - Normal efficiency';
+            }
+        }
+        
+        // Highlight active tick
+        ticks.forEach(tick => {
+            const tickLevel = parseInt(tick.dataset.level);
+            if (tickLevel === level) {
+                tick.classList.add('active');
+            } else {
+                tick.classList.remove('active');
+            }
+        });
+    }
+    
+    // Calculate average level for meter
+    const samples = state.simulation.hvacLevelSamples || [];
+    const avgLevel = samples.length > 0 
+        ? samples.reduce((a, b) => a + b, 0) / samples.length 
+        : level;
+    
+    if (avgLevelEl) {
+        avgLevelEl.textContent = avgLevel.toFixed(1);
+    }
+    
+    if (avgFillEl) {
+        // Convert 1-5 range to 0-100%
+        const fillPercent = ((avgLevel - 1) / 4) * 100;
+        avgFillEl.style.width = `${fillPercent}%`;
+        
+        // Color based on optimal range (2-4)
+        if (avgLevel >= 2 && avgLevel <= 4) {
+            avgFillEl.style.background = 'var(--accent-primary)';
+        } else if (avgLevel < 2) {
+            avgFillEl.style.background = 'var(--accent-info)'; // Too cold
+        } else {
+            avgFillEl.style.background = 'var(--accent-warning)'; // Too hot
+        }
+    }
+    
+    // Show warning if too cold
+    if (warningEl) {
+        if (avgLevel < 2 && !isFairWeather) {
+            warningEl.classList.remove('hidden');
+        } else {
+            warningEl.classList.add('hidden');
+        }
+    }
+}
+
+// Regen braking event callback storage
+let regenCallback = null;
+
+/**
+ * Show regenerative braking quick-time event
+ */
+export function showRegenBrakingEvent(stop, callback) {
+    const overlay = document.getElementById('regen-brake-overlay');
+    const resultEl = document.getElementById('regen-result');
+    const busEl = document.getElementById('regen-bus');
+    const energyBar = document.getElementById('regen-energy-bar');
+    const energyValue = document.getElementById('regen-energy-value');
+    
+    if (!overlay) return;
+    
+    regenCallback = callback;
+    
+    // Reset UI
+    overlay.classList.remove('hidden');
+    resultEl.classList.add('hidden');
+    
+    // Reset and restart bus approach animation
+    if (busEl) {
+        busEl.style.animation = 'none';
+        busEl.offsetHeight; // Force reflow
+        busEl.style.animation = `busApproach ${REGEN_BRAKING_CONFIG.eventDuration}ms ease-out forwards`;
+    }
+    
+    // Reset and restart energy bar animation
+    if (energyBar) {
+        energyBar.style.animation = 'none';
+        energyBar.offsetHeight; // Force reflow
+        energyBar.style.animation = `energyFill ${REGEN_BRAKING_CONFIG.eventDuration}ms ease-out forwards`;
+    }
+    
+    // Update energy value during animation
+    if (energyValue) {
+        let startTime = Date.now();
+        const updateEnergy = () => {
+            const elapsed = Date.now() - startTime;
+            const progress = Math.min(1, elapsed / REGEN_BRAKING_CONFIG.eventDuration);
+            const energy = REGEN_BRAKING_CONFIG.energyRecoveryMin + 
+                (REGEN_BRAKING_CONFIG.energyRecoveryMax - REGEN_BRAKING_CONFIG.energyRecoveryMin) * progress;
+            energyValue.textContent = `${energy.toFixed(1)} kWh`;
+            
+            if (progress < 1 && !overlay.classList.contains('hidden')) {
+                requestAnimationFrame(updateEnergy);
+            }
+        };
+        updateEnergy();
+    }
+    
+    // Set up timeout for missed event
+    const timeoutId = setTimeout(() => {
+        if (regenCallback) {
+            showRegenResult({ success: false, perfect: false });
+            regenCallback({ success: false, perfect: false });
+            regenCallback = null;
+        }
+    }, REGEN_BRAKING_CONFIG.eventDuration + 100);
+    
+    // Store timeout ID for potential cancellation
+    overlay.dataset.timeoutId = timeoutId;
+    
+    // Add click handler to overlay
+    overlay.onclick = handleRegenClick;
+    
+    // Add keyboard handler
+    document.addEventListener('keydown', handleRegenKeydown);
+}
+
+/**
+ * Handle click on regen overlay
+ */
+function handleRegenClick(e) {
+    e.stopPropagation();
+    triggerRegenBrakeInput();
+}
+
+/**
+ * Handle keyboard input for regen
+ */
+function handleRegenKeydown(e) {
+    if (e.code === 'Space' || e.key === ' ') {
+        e.preventDefault();
+        triggerRegenBrakeInput();
+    }
+}
+
+/**
+ * Show regen braking result
+ */
+function showRegenResult(result) {
+    const resultEl = document.getElementById('regen-result');
+    const textEl = resultEl.querySelector('.regen-result-text');
+    const energyEl = resultEl.querySelector('.regen-result-energy');
+    
+    if (!resultEl) return;
+    
+    resultEl.classList.remove('hidden', 'perfect', 'good', 'miss');
+    
+    if (result.perfect) {
+        resultEl.classList.add('perfect');
+        textEl.textContent = 'PERFECT!';
+        energyEl.textContent = `+${REGEN_BRAKING_CONFIG.energyRecoveryMax.toFixed(1)} kWh recovered`;
+    } else if (result.success) {
+        resultEl.classList.add('good');
+        textEl.textContent = 'GOOD!';
+        const avgRecovery = (REGEN_BRAKING_CONFIG.energyRecoveryMin + REGEN_BRAKING_CONFIG.energyRecoveryMax) / 2;
+        energyEl.textContent = `+${avgRecovery.toFixed(1)} kWh recovered`;
+    } else {
+        resultEl.classList.add('miss');
+        textEl.textContent = 'MISSED';
+        energyEl.textContent = 'No energy recovered';
+    }
+}
+
+/**
+ * Hide regenerative braking event
+ */
+export function hideRegenBrakingEvent() {
+    const overlay = document.getElementById('regen-brake-overlay');
+    
+    if (!overlay) return;
+    
+    // Clear timeout if exists
+    if (overlay.dataset.timeoutId) {
+        clearTimeout(parseInt(overlay.dataset.timeoutId));
+    }
+    
+    overlay.classList.add('hidden');
+    overlay.onclick = null;
+    document.removeEventListener('keydown', handleRegenKeydown);
+    regenCallback = null;
+}
+
+/**
+ * Show weather shift notification banner
+ */
+export function showWeatherShiftBanner(oldWeather, newWeather, direction, newEfficiency) {
+    // Remove any existing banner
+    const existingBanner = document.querySelector('.weather-shift-banner');
+    if (existingBanner) existingBanner.remove();
+    
+    const weatherIcons = {
+        fair: '☀️',
+        cold: '🌤️',
+        extreme: '❄️'
+    };
+    
+    const directionText = direction === 'colder' ? '📉 Getting Colder!' : '📈 Warming Up!';
+    const directionColor = direction === 'colder' ? '#e86565' : '#5cb884';
+    
+    const banner = document.createElement('div');
+    banner.className = 'weather-shift-banner';
+    banner.innerHTML = `
+        <div class="weather-shift-title" style="color: ${directionColor}">${directionText}</div>
+        <div class="weather-shift-detail">
+            Weather changed: ${weatherIcons[oldWeather]} ${oldWeather} → ${weatherIcons[newWeather]} ${newWeather}
+        </div>
+        <div class="weather-shift-efficiency">
+            New efficiency: <span class="weather-shift-efficiency">${newEfficiency.toFixed(2)} kWh/mi</span>
+        </div>
+    `;
+    
+    document.body.appendChild(banner);
+    
+    // Auto-remove after 5 seconds
+    setTimeout(() => {
+        banner.style.animation = 'weatherShiftAppear 0.4s ease-out reverse';
+        setTimeout(() => banner.remove(), 400);
+    }, 5000);
 }

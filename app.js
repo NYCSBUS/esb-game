@@ -4,7 +4,7 @@ import { getState, setRoutes, setBuses, resetStats, resetSimulation, resetWeek, 
 import { initializeMap, updateRouteLines, updateStops, updateBusPositions, fitMapToRoutes, updateChargingStations } from './js/map.js';
 import { generateRoutes } from './js/routing.js';
 import { initializeBuses, startSimulation, pauseSimulation } from './js/simulation.js';
-import { initSplashUI, initAppUI, updateRouteCards, updateWeekProgress, updateDayStats, updateScoreDisplay } from './js/ui.js';
+import { initSplashUI, initAppUI, updateRouteCards, updateWeekProgress, updateDayStats, updateScoreDisplay, initHVACControls, updateHVACDisplay } from './js/ui.js';
 import { APP_VERSION, WEATHER_PATTERNS } from './js/config.js';
 import { initAdminPanel } from './js/admin.js';
 
@@ -67,31 +67,37 @@ function setupStartButton() {
             resetStats();
             resetSimulation();
             
-            // Show main app
-            showApp();
-            
-            // Initialize UI
-            initAppUI();
-            
-            // Update map
-            setTimeout(() => {
-                map.resize();
-                updateRouteLines(routes);
-                updateStops(routes);
-                updateBusPositions(buses);
-                updateChargingStations();
+            // Show tutorial first, then app
+            showTutorial(() => {
+                // Show main app after tutorial
+                showApp();
                 
+                // Initialize UI
+                initAppUI();
+                
+                // Initialize HVAC controls
+                initHVACControls();
+                
+                // Update map
                 setTimeout(() => {
                     map.resize();
-                    fitMapToRoutes(routes);
-                }, 300);
-            }, 100);
-            
-            // Update UI
-            updateRouteCards();
-            updateWeekProgress();
-            updateDayStats();
-            updateScoreDisplay();
+                    updateRouteLines(routes);
+                    updateStops(routes);
+                    updateBusPositions(buses);
+                    updateChargingStations();
+                    
+                    setTimeout(() => {
+                        map.resize();
+                        fitMapToRoutes(routes);
+                    }, 300);
+                }, 100);
+                
+                // Update UI
+                updateRouteCards();
+                updateWeekProgress();
+                updateDayStats();
+                updateScoreDisplay();
+            });
             
         } catch (error) {
             console.error('Failed to start:', error);
@@ -102,9 +108,34 @@ function setupStartButton() {
 }
 
 /**
+ * Show tutorial modal
+ */
+function showTutorial(onComplete) {
+    const modal = document.getElementById('tutorial-modal');
+    const startBtn = document.getElementById('tutorial-start');
+    
+    if (!modal || !startBtn) {
+        // No tutorial modal, proceed directly
+        onComplete();
+        return;
+    }
+    
+    // Hide splash, show tutorial
+    document.getElementById('splash-screen').classList.add('hidden');
+    modal.classList.remove('hidden');
+    
+    // Setup button handler
+    startBtn.onclick = () => {
+        modal.classList.add('hidden');
+        onComplete();
+    };
+}
+
+/**
  * Show main app, hide splash
  */
 function showApp() {
     document.getElementById('splash-screen').classList.add('hidden');
+    document.getElementById('tutorial-modal').classList.add('hidden');
     document.getElementById('app').classList.remove('hidden');
 }

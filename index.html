@@ -277,8 +277,80 @@
                 </div>
             </div>
 
+            <!-- Regenerative Braking Quick-Time Event Overlay -->
+            <div id="regen-brake-overlay" class="regen-overlay hidden">
+                <div class="regen-content">
+                    <div class="regen-header">
+                        <div class="regen-title">ONE-PEDAL DRIVING</div>
+                        <div class="regen-subtitle">Release to harvest energy!</div>
+                    </div>
+                    <div class="regen-scene">
+                        <div class="regen-road">
+                            <div class="road-line"></div>
+                            <div class="road-line"></div>
+                            <div class="road-line"></div>
+                        </div>
+                        <div class="regen-stop-sign">🛑</div>
+                        <div class="regen-bus" id="regen-bus">🚌</div>
+                    </div>
+                    <div class="regen-energy-meter">
+                        <div class="energy-label">Energy Harvest</div>
+                        <div class="energy-bar-container">
+                            <div class="energy-bar" id="regen-energy-bar"></div>
+                            <div class="energy-zone perfect">PERFECT</div>
+                            <div class="energy-zone good">GOOD</div>
+                        </div>
+                        <div class="energy-value" id="regen-energy-value">0.0 kWh</div>
+                    </div>
+                    <div class="regen-instructions">
+                        <span class="key-hint">TAP</span> or press <span class="key-hint">SPACE</span> to brake
+                    </div>
+                    <div class="regen-result hidden" id="regen-result">
+                        <span class="regen-result-text"></span>
+                        <span class="regen-result-energy"></span>
+                    </div>
+                </div>
+            </div>
+
             <!-- Right Panel -->
             <aside class="right-panel">
+                <!-- HVAC Control Section -->
+                <div class="panel-section hvac-section">
+                    <h3 class="section-title">🌡️ Climate Control</h3>
+                    <div class="hvac-dial-container">
+                        <div class="hvac-dial-labels">
+                            <span class="dial-label cold">❄️ ECO</span>
+                            <span class="dial-label hot">🔥 HOT</span>
+                        </div>
+                        <div class="hvac-dial-wrapper">
+                            <input type="range" id="hvac-dial" class="hvac-dial" min="1" max="5" value="3" step="1">
+                            <div class="hvac-dial-ticks">
+                                <span class="tick" data-level="1">1</span>
+                                <span class="tick" data-level="2">2</span>
+                                <span class="tick optimal" data-level="3">3</span>
+                                <span class="tick" data-level="4">4</span>
+                                <span class="tick" data-level="5">5</span>
+                            </div>
+                        </div>
+                        <div class="hvac-dial-value">
+                            <span id="hvac-level-display">Level 3</span>
+                            <span id="hvac-effect">Balanced</span>
+                        </div>
+                    </div>
+                    <div class="hvac-info">
+                        <div class="hvac-status" id="hvac-status">Balanced heating - Normal efficiency</div>
+                        <div class="hvac-warning hidden" id="hvac-warning">⚠️ Passengers getting cold!</div>
+                    </div>
+                    <div class="hvac-meter">
+                        <div class="hvac-meter-label">Avg Temp: <span id="hvac-avg-level">3.0</span></div>
+                        <div class="hvac-meter-bar">
+                            <div class="hvac-meter-fill" id="hvac-avg-fill" style="width: 50%"></div>
+                            <div class="hvac-optimal-zone"></div>
+                        </div>
+                        <div class="hvac-meter-note">Keep in green zone for bonus</div>
+                    </div>
+                </div>
+
                 <div class="panel-section">
                     <h3 class="section-title">📊 Today's Stats</h3>
                     <div class="stats-grid" id="stats-grid">
@@ -496,6 +568,60 @@
             </div>
             <div class="modal-footer">
                 <button id="confirm-nightly-charge" class="modal-btn primary">Confirm & Continue →</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Tutorial/How to Play Modal -->
+    <div id="tutorial-modal" class="modal tutorial-modal hidden">
+        <div class="modal-content tutorial-content">
+            <div class="modal-header">
+                <div class="modal-icon">🎮</div>
+                <h2>How to Maximize Your Score</h2>
+                <p class="modal-subtitle">Master these skills to top the leaderboard!</p>
+            </div>
+            <div class="modal-body tutorial-body">
+                <div class="tutorial-grid">
+                    <div class="tutorial-card">
+                        <div class="tutorial-icon">🔋</div>
+                        <h4>Smart Charging</h4>
+                        <p>Set the right overnight charge level. Too much wastes money, too little risks stranding!</p>
+                        <div class="tutorial-points">+75 pts for efficient charging</div>
+                    </div>
+                    <div class="tutorial-card">
+                        <div class="tutorial-icon">⚡</div>
+                        <h4>Regen Braking</h4>
+                        <p>Time your braking perfectly at each stop to recover energy. Watch the bus approach and brake at the right moment!</p>
+                        <div class="tutorial-points">+10 pts per perfect brake</div>
+                    </div>
+                    <div class="tutorial-card">
+                        <div class="tutorial-icon">🌡️</div>
+                        <h4>Climate Control</h4>
+                        <p>Balance passenger comfort with energy efficiency using the temperature dial. Stay in the green zone!</p>
+                        <div class="tutorial-points">+20 pts for optimal balance</div>
+                    </div>
+                    <div class="tutorial-card">
+                        <div class="tutorial-icon">🚫</div>
+                        <h4>Avoid Mid-Day Charging</h4>
+                        <p>Mid-day charging costs 2x more AND loses points. Plan your route to complete on a single charge!</p>
+                        <div class="tutorial-points penalty">-50 pts penalty</div>
+                    </div>
+                    <div class="tutorial-card">
+                        <div class="tutorial-icon">⛈️</div>
+                        <h4>Weather Shifts</h4>
+                        <p>Weather can change mid-day! Survive a weather shift without charging for bonus points.</p>
+                        <div class="tutorial-points">+50 pts survival bonus</div>
+                    </div>
+                    <div class="tutorial-card">
+                        <div class="tutorial-icon">🎯</div>
+                        <h4>Route Prediction</h4>
+                        <p>Predict the optimal route distance for all 3 days. Factor in the worst weather!</p>
+                        <div class="tutorial-points">+500 pts for perfect prediction</div>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button id="tutorial-start" class="modal-btn primary large">Let's Go! 🚌</button>
             </div>
         </div>
     </div>

@@ -1,10 +1,10 @@
 // ESB Fleet Planner - Simulation Engine
 
 import { getState, updateStats, resetStats, resetSimulation as resetSimulationState, advanceDay, setPendingCharge, clearPendingCharge, addDayScore, addBonus, addPenalty, recordNightlyCharging, saveToLeaderboard } from './state.js';
-import { ESB_EFFICIENCY, DIESEL_MPG, FUEL_COSTS, BATTERY_CONFIG, SIMULATION_CONFIG, WEATHER_PATTERNS, WEATHER_INFO, SCORING, CHARGING_STATIONS, MIDDAY_CHARGING, TIME_WINDOWS, CO2_CONFIG, CELEBRATION_MESSAGES, V2G_CONFIG } from './config.js';
+import { ESB_EFFICIENCY, DIESEL_MPG, FUEL_COSTS, BATTERY_CONFIG, SIMULATION_CONFIG, WEATHER_PATTERNS, WEATHER_INFO, SCORING, CHARGING_STATIONS, MIDDAY_CHARGING, TIME_WINDOWS, CO2_CONFIG, CELEBRATION_MESSAGES, V2G_CONFIG, HVAC_CONFIG, REGEN_BRAKING_CONFIG, WEATHER_SHIFT_CONFIG } from './config.js';
 import { interpolatePosition, calculatePathLength, haversineDistance } from './utils.js';
 import { updateBusPositions, updateStops, clearBusMarkers, updateChargingStations } from './map.js';
-import { updateUI, updateRouteCards, updateCostDisplay, updateFleetStatus, updatePenaltyTracker, updateWeekProgress, updateDayStats, showChargingModal, showNightlyChargingModal, updateScoreDisplay, updateTimeDisplay } from './ui.js';
+import { updateUI, updateRouteCards, updateCostDisplay, updateFleetStatus, updatePenaltyTracker, updateWeekProgress, updateDayStats, showChargingModal, showNightlyChargingModal, updateScoreDisplay, updateTimeDisplay, updateHVACDisplay, showRegenBrakingEvent, hideRegenBrakingEvent, showWeatherShiftBanner } from './ui.js';
 import { getAvailableChargingStations, getOSRMRouteBetweenPoints } from './routing.js';
 
 let simulationInterval = null;
@@ -255,6 +255,9 @@ export function startSimulation() {
     calculateSpeedMultiplier();
     simulationInterval = setInterval(simulationLoop, SIMULATION_CONFIG.updateInterval);
     
+    // Update HVAC display for current day's weather
+    updateHVACDisplay();
+    
     document.getElementById('btn-start').disabled = true;
     document.getElementById('btn-pause').disabled = false;
 }
@@ -371,6 +374,12 @@ function handleDayComplete() {
     const baseEnergy = state.stats.totalEnergyConsumed - (state.stats.midDayChargingKwh || 0);
     const baseCost = baseEnergy * FUEL_COSTS.electric.overnight;
     state.stats.electricCost = baseCost + (state.stats.midDayChargingCost || 0);
+    
+    // Apply HVAC scoring (comfort bonus or eco overuse penalty)
+    applyHVACScoring();
+    
+    // Apply weather shift survival bonus if applicable
+    applyWeatherShiftScoring();
     
     // Calculate day score
     calculateDayScore();
@@ -580,6 +589,7 @@ async function continueToNextDay(chargePercent, newRouteDistance = null) {
     updateDayStats();
     updateRouteCards();
     updateScoreDisplay();
+    updateHVACDisplay(); // Update HVAC dial for new day's weather
     
     import('./map.js').then(({ updateRouteLines, updateStops, updateBusPositions }) => {
         updateRouteLines(state.routes);
@@ -740,6 +750,19 @@ function moveBus(bus, route, deltaTime) {
         return;
     }
     
+    // Sample HVAC level periodically for scoring (every ~500ms of game time)
+    if (state.weather !== 'fair') {
+        const currentLevel = state.simulation.hvacLevel || HVAC_CONFIG.defaultLevel;
+        if (!state.simulation.hvacLevelSamples) {
+            state.simulation.hvacLevelSamples = [];
+        }
+        // Sample less frequently to avoid huge arrays
+        if (state.simulation.hvacLevelSamples.length < 100) {
+            state.simulation.hvacLevelSamples.push(currentLevel);
+        }
+    }
+    updateHVACDisplay();
+    
     const speedMph = SIMULATION_CONFIG.baseSpeedMph;
     const hoursElapsed = deltaTime / (3600 * 1000);
     const distanceToTravel = speedMph * hoursElapsed;
@@ -755,7 +778,7 @@ function moveBus(bus, route, deltaTime) {
         bus.position = newPosition;
     }
     
-    // Energy consumption
+    // Energy consumption (affected by HVAC mode)
     const efficiency = getEfficiency(bus.busType, state.weather);
     const energyUsed = distanceToTravel * efficiency;
     
@@ -778,6 +801,9 @@ function moveBus(bus, route, deltaTime) {
         triggerGameOver('stranded');
         return;
     }
+    
+    // Check for regenerative braking opportunity (approaching a stop)
+    checkRegenBrakingOpportunity(bus, route);
     
     // Update trip phase
     if (bus.progress >= 0.45 && bus.progress <= 0.55) {
@@ -816,11 +842,285 @@ function moveBus(bus, route, deltaTime) {
 }
 
 /**
- * Get efficiency based on bus type and weather
+ * Check if bus is approaching a stop and trigger regen braking event
  */
-export function getEfficiency(busType, weather) {
+function checkRegenBrakingOpportunity(bus, route) {
+    const state = getState();
+    
+    // Don't trigger if event already active or paused
+    if (state.simulation.regenEventActive || state.simulation.paused) return;
+    
+    // Find next uncompleted pickup/dropoff stop
+    const nextStop = route.stops.find((stop, idx) => 
+        idx >= bus.currentStopIndex && 
+        !stop.completed && 
+        (stop.type === 'pickup' || stop.type === 'dropoff')
+    );
+    
+    if (!nextStop) return;
+    
+    // Check if within trigger distance
+    const distance = haversineDistance(bus.position, nextStop.coords);
+    
+    if (distance <= REGEN_BRAKING_CONFIG.triggerDistance && distance > 0.05) {
+        // Check if we already triggered for this stop
+        if (state.simulation.regenEventStop === nextStop.id) return;
+        
+        // Trigger regen braking event!
+        state.simulation.regenEventActive = true;
+        state.simulation.regenEventStop = nextStop.id;
+        state.simulation.regenEventStartTime = Date.now();
+        
+        pauseSimulation();
+        showRegenBrakingEvent(nextStop, (result) => {
+            handleRegenBrakingResult(bus, result);
+        });
+    }
+}
+
+/**
+ * Handle the result of a regenerative braking event
+ */
+function handleRegenBrakingResult(bus, result) {
+    const state = getState();
+    
+    state.simulation.regenEventActive = false;
+    
+    if (result.success) {
+        // Calculate energy recovered based on timing
+        const energyRecovered = result.perfect 
+            ? REGEN_BRAKING_CONFIG.energyRecoveryMax 
+            : REGEN_BRAKING_CONFIG.energyRecoveryMin + 
+              (REGEN_BRAKING_CONFIG.energyRecoveryMax - REGEN_BRAKING_CONFIG.energyRecoveryMin) * 0.5;
+        
+        // Add energy to battery
+        bus.batteryKwh = Math.min(bus.batteryCapacity, bus.batteryKwh + energyRecovered);
+        bus.batteryLevel = (bus.batteryKwh / bus.batteryCapacity) * 100;
+        
+        state.simulation.regenEnergyRecovered += energyRecovered;
+        state.simulation.regenSuccessCount++;
+        
+        if (result.perfect) {
+            state.simulation.regenPerfectCount++;
+            addBonus({ reason: 'Perfect regen brake', points: REGEN_BRAKING_CONFIG.perfectBonus, day: state.week.currentDay });
+        } else {
+            addBonus({ reason: 'Good regen brake', points: REGEN_BRAKING_CONFIG.goodBonus, day: state.week.currentDay });
+        }
+        
+        console.log(`Regen braking: ${result.perfect ? 'PERFECT' : 'GOOD'}! +${energyRecovered.toFixed(2)} kWh recovered`);
+    } else {
+        console.log('Regen braking: Missed opportunity');
+    }
+    
+    updateScoreDisplay();
+    
+    // Resume simulation after a short delay
+    setTimeout(() => {
+        hideRegenBrakingEvent();
+        startSimulation();
+    }, result.success ? 800 : 400);
+}
+
+/**
+ * Handle player input for regen braking event
+ * Called from UI when player clicks/taps or presses space
+ */
+export function triggerRegenBrakeInput() {
+    const state = getState();
+    
+    if (!state.simulation.regenEventActive) return;
+    
+    const elapsed = Date.now() - state.simulation.regenEventStartTime;
+    const duration = REGEN_BRAKING_CONFIG.eventDuration;
+    const progress = elapsed / duration; // 0 to 1
+    
+    // Target zone is 25% to 50% of the animation (when circle is shrinking to target)
+    const perfectStart = 1 - REGEN_BRAKING_CONFIG.perfectWindow;
+    const goodStart = 1 - REGEN_BRAKING_CONFIG.goodWindow;
+    
+    let result = { success: false, perfect: false };
+    
+    if (progress >= perfectStart && progress <= 1) {
+        result = { success: true, perfect: true };
+    } else if (progress >= goodStart && progress < perfectStart) {
+        result = { success: true, perfect: false };
+    }
+    
+    // Find bus and handle result
+    const bus = state.buses[0];
+    if (bus) {
+        handleRegenBrakingResult(bus, result);
+    }
+}
+
+/**
+ * Get efficiency based on bus type, weather, and HVAC dial level
+ * Lower dial levels (colder) save energy, higher levels (hotter) use more
+ */
+export function getEfficiency(busType, weather, applyHvacMode = true) {
     const type = busType === 'A' ? 'typeA' : 'typeC';
-    return ESB_EFFICIENCY[type][weather];
+    let efficiency = ESB_EFFICIENCY[type][weather];
+    
+    // Apply HVAC dial effect (only in cold/extreme weather)
+    if (applyHvacMode && weather !== 'fair') {
+        const state = getState();
+        const dialLevel = state.simulation.hvacLevel || HVAC_CONFIG.defaultLevel;
+        const centerLevel = 3; // Level 3 is neutral
+        const levelDiff = dialLevel - centerLevel;
+        
+        // Each level from center changes efficiency by 5%
+        // Lower levels (1-2) = more efficient (negative diff = multiply by < 1)
+        // Higher levels (4-5) = less efficient (positive diff = multiply by > 1)
+        const modifier = 1 + (levelDiff * HVAC_CONFIG.efficiencyPerLevel);
+        efficiency *= modifier;
+    }
+    
+    return efficiency;
+}
+
+/**
+ * Set HVAC dial level (1-5)
+ */
+export function setHVACLevel(level) {
+    const state = getState();
+    
+    // Clamp to valid range
+    const clampedLevel = Math.max(HVAC_CONFIG.minLevel, Math.min(HVAC_CONFIG.maxLevel, level));
+    
+    // Check if HVAC is disabled (fair weather)
+    if (state.weather === 'fair' && HVAC_CONFIG.disabledInFairWeather) {
+        console.log('HVAC control not available in fair weather');
+        return false;
+    }
+    
+    state.simulation.hvacLevel = clampedLevel;
+    
+    // Track level for scoring (accumulate for average)
+    if (!state.simulation.hvacLevelSamples) {
+        state.simulation.hvacLevelSamples = [];
+    }
+    state.simulation.hvacLevelSamples.push(clampedLevel);
+    
+    updateHVACDisplay();
+    console.log(`HVAC level set to: ${clampedLevel}`);
+    return true;
+}
+
+/**
+ * Check for mid-day weather shift (called when bus arrives at school)
+ */
+function checkWeatherShift() {
+    const state = getState();
+    
+    // Only check once per day
+    if (state.simulation.weatherShifted) return;
+    
+    // Check if this weather pattern is eligible for shifts
+    const patternKey = state.config.weatherPattern;
+    if (!WEATHER_SHIFT_CONFIG.eligiblePatterns.includes(patternKey)) {
+        console.log('Weather pattern not eligible for shifts');
+        return;
+    }
+    
+    // Random chance of shift
+    if (Math.random() > WEATHER_SHIFT_CONFIG.probability) {
+        console.log('No weather shift today (random check)');
+        return;
+    }
+    
+    // Determine shift direction (50/50 warmer or colder)
+    const currentWeather = state.weather;
+    const shiftOptions = WEATHER_SHIFT_CONFIG.shifts[currentWeather];
+    
+    // Get possible directions
+    const directions = [];
+    if (shiftOptions.warmer) directions.push({ direction: 'warmer', weather: shiftOptions.warmer });
+    if (shiftOptions.colder) directions.push({ direction: 'colder', weather: shiftOptions.colder });
+    
+    if (directions.length === 0) {
+        console.log('No weather shift possible from current weather');
+        return;
+    }
+    
+    // Pick random direction
+    const shift = directions[Math.floor(Math.random() * directions.length)];
+    
+    // Apply weather shift
+    state.simulation.weatherShifted = true;
+    state.simulation.originalWeather = currentWeather;
+    state.simulation.shiftedWeather = shift.weather;
+    state.weather = shift.weather;
+    
+    // Calculate new efficiency for display
+    const bus = state.buses[0];
+    const newEfficiency = getEfficiency(bus.busType, shift.weather, false);
+    
+    console.log(`⛈️ WEATHER SHIFT! ${currentWeather} → ${shift.weather} (${shift.direction}). New efficiency: ${newEfficiency.toFixed(2)} kWh/mi`);
+    
+    // Show notification
+    showWeatherShiftBanner(currentWeather, shift.weather, shift.direction, newEfficiency);
+}
+
+/**
+ * Apply HVAC bonus/penalty at end of day based on average dial level
+ */
+export function applyHVACScoring() {
+    const state = getState();
+    const samples = state.simulation.hvacLevelSamples || [];
+    
+    // Check if weather allowed HVAC control
+    const weatherAllowedHVAC = state.weather !== 'fair';
+    
+    if (!weatherAllowedHVAC) {
+        // No HVAC control in fair weather - give neutral bonus
+        addBonus({ reason: 'Fair weather (no heating needed)', points: 10, day: state.week.currentDay });
+        console.log(`HVAC Scoring: Fair weather, +10 pts`);
+        updateScoreDisplay();
+        return;
+    }
+    
+    if (samples.length === 0) {
+        // No samples, use default level 3
+        samples.push(HVAC_CONFIG.defaultLevel);
+    }
+    
+    // Calculate average level
+    const avgLevel = samples.reduce((a, b) => a + b, 0) / samples.length;
+    
+    // Check if within optimal range (2-4)
+    const { min: optMin, max: optMax } = HVAC_CONFIG.optimalRange;
+    const isOptimal = avgLevel >= optMin && avgLevel <= optMax;
+    
+    if (isOptimal) {
+        // Kept in optimal balance zone - bonus
+        addBonus({ reason: 'Optimal climate balance!', points: HVAC_CONFIG.optimalBonus, day: state.week.currentDay });
+        console.log(`HVAC Scoring: Average level ${avgLevel.toFixed(1)} in optimal zone - bonus +${HVAC_CONFIG.optimalBonus} pts`);
+    } else if (avgLevel < HVAC_CONFIG.comfortPenaltyThreshold) {
+        // Too cold - passengers uncomfortable
+        addPenalty({ reason: 'Passengers too cold!', points: HVAC_CONFIG.comfortPenalty, day: state.week.currentDay });
+        console.log(`HVAC Scoring: Average level ${avgLevel.toFixed(1)} too cold - penalty ${HVAC_CONFIG.comfortPenalty} pts`);
+    }
+    // If too hot (above optimal), no penalty - just wasted energy
+    
+    updateScoreDisplay();
+}
+
+/**
+ * Apply weather shift survival bonus at end of day
+ */
+export function applyWeatherShiftScoring() {
+    const state = getState();
+    
+    // Check if weather shifted and we survived without mid-day charge
+    if (state.simulation.weatherShifted && state.stats.midDayCharges === 0) {
+        addBonus({ 
+            reason: 'Survived weather shift!', 
+            points: WEATHER_SHIFT_CONFIG.survivalBonus, 
+            day: state.week.currentDay 
+        });
+        console.log(`Weather shift bonus: +${WEATHER_SHIFT_CONFIG.survivalBonus} pts for completing without mid-day charge`);
+        updateScoreDisplay();
+    }
 }
 
 /**
@@ -869,6 +1169,9 @@ function processStopArrival(bus, route, currentStop) {
         console.log(`AM trip complete! Arrived at school @ ${getState().simulation.timeString}, Battery: ${bus.batteryLevel.toFixed(0)}%`);
         bus.arrivedAtSchool = true;
         bus.status = 'at-school';
+        
+        // Check for weather shift at school arrival
+        checkWeatherShift();
         
         const needsCharging = checkChargingNeeds(bus, route);
         
